@@ -1,8 +1,8 @@
 import pygtk
 pygtk.require('2.0')
 from gi.repository import GUPnP, GUPnPAV, GObject, GLib
-
-import pandora, os, re, atexit, sys, time
+from pandora import pandora
+import os, re, atexit, sys, time
 
 CON_ID = None
 MPDCLIENT = None
@@ -30,11 +30,26 @@ def setup_server():
     CONTEXT = ctx
     return rd
 
+def save_pandora_song_info(title, artist, album, love):
+    print title, artist, album
+    CLIENT.title = title
+    CLIENT.artist = artist
+    CLIENT.album = album
+
+def save_pandora_time_info(timeinfo):
+    stime = re.match("^.+(\d+\:\d+)\/(\d+\:\d\d)$", timeinfo)
+    CLIENT.total_time = time_to_int("00:" + stime.group(2))
+    CLIENT.elapsed_time = CLIENT.total_time - time_to_int("00:" + stime.group(1))
+
 def setup_pandora():
     c = pandora.Config()
     global CLIENT
     CLIENT = pandora.Pandora(c) 
     CLIENT.start()
+
+    CLIENT.song_callback = save_pandora_song_info
+    CLIENT.second_callback = save_pandora_time_info
+
 
 rd = setup_server()
 print "UPnP MediaRenderer Service Exported"
@@ -42,8 +57,87 @@ print "UPnP MediaRenderer Service Exported"
 setup_pandora()
 print "Pandora Client Setup"
 
+def int_to_time(timevalue):
+    timevalue = int(timevalue)
+    return "%.2d:%.2d:%.2d" % (int(timevalue / 3600),
+                               int(timevalue / 60),
+                               timevalue % 60)
 
-def set_mpd_uri(service, action, uri):
+def time_to_int(time):
+    (hour, min, sec) = time.split(":")
+    return (int(hour) * 3600) + (int(min) * 60) + int(sec)
+    
+        
+def handle_position_request(service, action):
+    print "Position"
+    
+    w = GUPnPAV.GUPnPDIDLLiteWriter.new("English")   
+
+    item = w.add_item()
+    item.set_title(getattr(CLIENT, "title", ""))
+    item.set_artist(getattr(CLIENT, "artist", ""))
+    item.set_album(getattr(CLIENT, "album", ""))
+
+    action.set_value("Track", "0")
+    action.set_value("TrackMetaData", w.get_string())
+    action.set_value("TrackURI", "") #getattr(song, "url", ""))
+
+    action.set_value("TrackDuration",
+                    int_to_time(getattr(CLIENT, "total_time", 0)))
+    
+    curtime = int_to_time(getattr(CLIENT, "elapsed_time", 0))
+    action.set_value("RelTime", curtime)
+    action.set_value("AbsTime", curtime)
+    
+    getattr(action, "return")()
+
+def handle_state_request(service, action):
+    print "Status"
+
+    if CLIENT.playing:
+        state = "PLAYING"
+    else:
+        state = "PAUSED_PLAYBACK"
+
+    action.set_value("CurrentTransportState", state)
+    action.set_value("CurrentTransportStatus", "OK")
+    action.set_value("CurrentSpeed", "1")
+    
+    getattr(action, "return")()
+
+
+def pandora_play(service, action):
+  print "Play"
+  CLIENT.toggle()
+  getattr(action, "return")()
+
+def pandora_next(service, action):
+  print "Next"
+  CLIENT.next()
+  getattr(action, "return")()
+
+service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
+service.connect("action-invoked::Play", pandora_play)
+service.connect("action-invoked::Pause", pandora_play)
+service.connect("action-invoked::Next", pandora_next)
+#service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
+service.connect("action-invoked::GetTransportInfo", handle_state_request)
+service.connect("action-invoked::GetPositionInfo",  handle_position_request)
+
+#directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
+#directory.connect("action-invoked::Browse", browse_action)
+
+print "Awaiting commands..."
+try:
+    GObject.MainLoop().run()
+except KeyboardInterrupt:    
+    print "Done"
+    sys.exit(0)
+
+
+
+
+def set_pandora_uri(service, action, uri):
     print "Playing %s" % uri
     match = re.search("/file\/(.*)$", uri)
     if not match:
@@ -85,7 +179,7 @@ def set_http_uri(service, action, uri):
     1) Download file
     2) Add file to DB
     3) Load file to local library
-    4) Generate an MPD uri and then call set_mpd_uri
+    4) Generate an pandora uri and then call set_pandora_uri
     """
     path = uri.replace("http:/", "")
     filename = os.path.basename(path)
@@ -118,108 +212,8 @@ def handle_uri_change(service, action):
       return None
 
     if CONTEXT.get_host_ip() in uri and str(CONTEXT.get_port()) in uri:
-        return set_mpd_uri(service, action, uri)
+        return set_pandora_uri(service, action, uri)
     else:
         return set_http_uri(service, action, uri)
 
-
-def int_to_time(timevalue):
-    timevalue = int(timevalue)
-    return "%.2d:%.2d:%.2d" % (int(timevalue / 3600),
-                               int(timevalue / 60),
-                               timevalue % 60)
-
-def time_to_int(time):
-    (hour, min, sec) = time.split(":")
-    return (int(hour) * 3600) + (int(min) * 60) + int(sec)
-    
-        
-def handle_position_request(service, action):
-    print "Position"
-
-    MPDCLIENT.connect()
-    status = MPDCLIENT.status()
-    songinfo = MPDCLIENT.playlistid(status['songid'])
-    MPDCLIENT.disconnect()
-    
-    w = GUPnPAV.GUPnPDIDLLiteWriter.new("English")   
-    song = LIBRARY.songs_by_file.get(songinfo[0]['file'], None)
-
-    song_id = "0"
-    if song:
-      song.writeself(w)
-      song_id = str(song.id)
- 
-    action.set_value("Track", song_id)
-    action.set_value("TrackMetaData", w.get_string())
-    action.set_value("TrackURI", getattr(song, "url", ""))
-
-    action.set_value("TrackDuration",
-                     int_to_time(status.get("time", "0:0").split(":")[1]))
-    
-    curtime = int_to_time(status.get("time", "0:0").split(":")[0])
-    action.set_value("RelTime", curtime)
-    action.set_value("AbsTime", curtime)
-    
-    getattr(action, "return")()
-
-def handle_state_request(service, action):
-    print "Status"
-    
-    MPDCLIENT.connect()
-    status = MPDCLIENT.status()
-    MPDCLIENT.disconnect()
-
-    if status and status['state'] == "pause":
-        state = "PAUSED_PLAYBACK"
-    elif status and status['state'] == "play":
-        state = "PLAYING"
-    else:
-        state = "STOPPED"
-
-    action.set_value("CurrentTransportState", state)
-    action.set_value("CurrentTransportStatus", "OK")
-    action.set_value("CurrentSpeed", "1")
-    
-    getattr(action, "return")()
-
-
-def handle_seek_request(service, action):
-    seek_time = action.get_value_type('Target', GObject.TYPE_STRING)
-    MPDCLIENT.connect()
-    status = MPDCLIENT.status()
-    print "id: %s" % status["songid"], seek_time
-    MPDCLIENT.seek(status["songid"], time_to_int(seek_time))
-    MPDCLIENT.disconnect()
-
-    getattr(action, "return")()
-    
-def pandora_play(service, action):
-  print "Play"
-  CLIENT.toggle()
-  getattr(action, "return")()
-
-def pandora_next(service, action):
-  print "Next"
-  CLIENT.next()
-  getattr(action, "return")()
-
-service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
-service.connect("action-invoked::Play", pandora_play)
-service.connect("action-invoked::Pause", pandora_play)
-service.connect("action-invoked::Next", pandora_next)
-#service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
-#service.connect("action-invoked::GetTransportInfo", handle_state_request)
-#service.connect("action-invoked::GetPositionInfo",  handle_position_request)
-#service.connect("action-invoked::Seek", handle_seek_request)
-
-#directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
-#directory.connect("action-invoked::Browse", browse_action)
-
-print "Awaiting commands..."
-try:
-    GObject.MainLoop().run()
-except KeyboardInterrupt:    
-    print "Done"
-    sys.exit(0)
 
