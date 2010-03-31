@@ -196,13 +196,18 @@ def handle_seek_request(service, action):
     
 def pandora_play(service, action):
   print "Play"
+  CLIENT.toggle()
+  getattr(action, "return")()
+
+def pandora_next(service, action):
+  print "Next"
+  CLIENT.next()
+  getattr(action, "return")()
 
 service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
 service.connect("action-invoked::Play", pandora_play)
-#service.connect("action-invoked::Pause", mpd_func_generator("Pause"))
-#service.connect("action-invoked::Stop", mpd_func_generator("Stop"))
-#service.connect("action-invoked::Next", mpd_func_generator("Next"))
-#service.connect("action-invoked::Previous", mpd_func_generator("Previous"))
+service.connect("action-invoked::Pause", pandora_play)
+service.connect("action-invoked::Next", pandora_next)
 #service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
 #service.connect("action-invoked::GetTransportInfo", handle_state_request)
 #service.connect("action-invoked::GetPositionInfo",  handle_position_request)
@@ -217,3 +222,4 @@ try:
 except KeyboardInterrupt:    
     print "Done"
     sys.exit(0)
+
