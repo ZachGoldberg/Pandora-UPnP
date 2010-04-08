@@ -153,7 +153,7 @@ def list_stations(service, action):
     getattr(action, "return")()
 
 def handle_uri_change(service, action):
-    uri = action.get_value_type("CurrentURI", GObject.TYPE_STRING)
+    uri = action.get_value("CurrentURI", GObject.TYPE_STRING)
     print "Change URI: %s" % uri
     if not uri:
         getattr(action, "return")()
