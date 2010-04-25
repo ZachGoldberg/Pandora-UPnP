@@ -13,7 +13,7 @@ CONTEXT = None
 def setup_server():
     global CONTEXT
     
-    ctx = GUPnP.Context(interface="wlan0")
+    ctx = GUPnP.Context(interface="eth0")
 
     ctx.host_path("xml/device.xml", "device.xml")
     ctx.host_path("xml/AVTransport2.xml", "AVTransport2.xml")
@@ -45,6 +45,13 @@ def save_pandora_time_info(timeinfo):
 
 def setup_pandora():
     c = pandora.Config()
+    c.load()
+    if not c.user:
+	c.user = raw_input("Pandora Username:")
+	import getpass
+	c.password = getpass.getpass()
+	c.write()
+
     global CLIENT
     CLIENT = pandora.Pandora(c) 
     CLIENT.start()
