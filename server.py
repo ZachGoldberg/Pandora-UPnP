@@ -10,6 +10,7 @@ LIBRARY = None
 GObject.threads_init()
 CONTEXTS = []
 MGR = None
+SERVICES = []
 
 def context_available(mgr, ctx, data=None):
     global CONTEXTS
@@ -35,7 +36,12 @@ def context_available(mgr, ctx, data=None):
     directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
     directory.connect("action-invoked::Browse", list_stations)
 
+    SERVICES.append(service)
+    SERVICES.append(directory)
+
     MGR.manage_root_device(rd)
+
+    print "Context setup for %s" % ctx.get_interface()
 
 def setup_server():
     global MGR
