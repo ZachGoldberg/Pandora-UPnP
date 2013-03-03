@@ -1,5 +1,3 @@
-import pygtk
-pygtk.require('2.0')
 from gi.repository import GUPnP, GUPnPAV, GObject, GLib
 from pandora import pandora
 import os, re, atexit, sys, time
@@ -92,7 +90,7 @@ def time_to_int(time):
 def handle_position_request(service, action):
     print "Position"
     
-    w = GUPnPAV.GUPnPDIDLLiteWriter.new("English")   
+    w = GUPnPAV.DIDLLiteWriter.new("English")   
 
     item = w.add_item()
     item.set_title(getattr(CLIENT, "title", ""))
@@ -151,14 +149,16 @@ def set_pandora_uri(service, action, uri):
     getattr(action, "return")()
 
 def list_stations(service, action):
-    w = GUPnPAV.GUPnPDIDLLiteWriter.new("English")
+    w = GUPnPAV.DIDLLiteWriter.new("English")
 
+    ctx = service.get_context()
+    import pdb; pdb.set_trace()
     for station in CLIENT.stations:
         item = w.add_item()
         item.set_title(station)
         uri = "http://%s:%s/station/%s" % (
-            CONTEXT.get_host_ip(),
-            CONTEXT.get_port(),
+            ctx.get_host_ip(),
+            ctx.get_port(),
             station
             )
 
@@ -178,26 +178,26 @@ def handle_uri_change(service, action):
     if not uri:
         getattr(action, "return")()
         return None
-
-    if CONTEXT.get_host_ip() in uri and str(CONTEXT.get_port()) in uri:
+    ctx = service.get_context()
+    if ctx.get_host_ip() in uri and str(ctx.get_port()) in uri:
         return set_pandora_uri(service, action, uri)
     else:
         action.return_error(0, "Invalid URI")
 
 
-rd = setup_server()
-print "UPnP MediaRenderer Service Exported"
+if __name__ == '__main__':
+    rd = setup_server()
+    print "UPnP MediaRenderer Service Exported"
 
-setup_pandora()
-print "Pandora Client Setup"
+    setup_pandora()
+    print "Pandora Client Setup"
 
-
-print "Awaiting commands..."
-try:
-    GObject.MainLoop().run()
-except KeyboardInterrupt:    
-    print "Done"
-    sys.exit(0)
+    print "Awaiting commands..."
+    try:
+        GObject.MainLoop().run()
+    except KeyboardInterrupt:    
+        print "Done"
+        os._exit(0)
 
 
 
