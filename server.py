@@ -8,18 +8,15 @@ CON_ID = None
 MPDCLIENT = None
 LIBRARY = None
 GObject.threads_init()
-CONTEXT = None
+CONTEXTS = []
+MGR = None
 
-def setup_server():
-    global CONTEXT
-    
-    ctx = GUPnP.Context(interface="eth0")
-
+def context_available(mgr, ctx, data=None):
+    global CONTEXTS
+    CONTEXTS.append(ctx)
     ctx.host_path("xml/device.xml", "device.xml")
     ctx.host_path("xml/AVTransport2.xml", "AVTransport2.xml")
     ctx.host_path("xml/ContentDirectory.xml", "ContentDirectory.xml")
-
-    ctx.host_path("/mnt/nixsys/Music/all/Seether/Seether featuring Amy Lee - Broken.mp3", "/file/test.mp3")
 
     desc = "device.xml"
     desc_loc = "./xml/"
@@ -27,8 +24,24 @@ def setup_server():
     rd = GUPnP.RootDevice.new(ctx, desc, desc_loc)
     rd.set_available(True)
 
-    CONTEXT = ctx
-    return rd
+    service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
+    service.connect("action-invoked::Play", pandora_play)
+    service.connect("action-invoked::Pause", pandora_play)
+    service.connect("action-invoked::Next", pandora_next)
+    service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
+    service.connect("action-invoked::GetTransportInfo", handle_state_request)
+    service.connect("action-invoked::GetPositionInfo",  handle_position_request)
+
+    directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
+    directory.connect("action-invoked::Browse", list_stations)
+
+    MGR.manage_root_device(rd)
+
+def setup_server():
+    global MGR
+    
+    MGR = GUPnP.ContextManager.create(0)
+    MGR.connect("context-available", context_available)
 
 def save_pandora_song_info(title, artist, album, love):
     print title, artist, album
@@ -58,12 +71,6 @@ def setup_pandora():
 
     CLIENT.song_callback = save_pandora_song_info
     CLIENT.second_callback = save_pandora_time_info
-
-rd = setup_server()
-print "UPnP MediaRenderer Service Exported"
-
-setup_pandora()
-print "Pandora Client Setup"
 
 def int_to_time(timevalue):
     timevalue = int(timevalue)
@@ -171,16 +178,13 @@ def handle_uri_change(service, action):
     else:
         action.return_error(0, "Invalid URI")
 
-service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
-service.connect("action-invoked::Play", pandora_play)
-service.connect("action-invoked::Pause", pandora_play)
-service.connect("action-invoked::Next", pandora_next)
-service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
-service.connect("action-invoked::GetTransportInfo", handle_state_request)
-service.connect("action-invoked::GetPositionInfo",  handle_position_request)
 
-directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
-directory.connect("action-invoked::Browse", list_stations)
+rd = setup_server()
+print "UPnP MediaRenderer Service Exported"
+
+setup_pandora()
+print "Pandora Client Setup"
+
 
 print "Awaiting commands..."
 try:
