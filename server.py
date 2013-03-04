@@ -10,6 +10,10 @@ GObject.threads_init()
 CONTEXTS = []
 MGR = None
 SERVICES = []
+proto = GUPnPAV.ProtocolInfo()
+proto.set_mime_type("audio/mp3")
+proto.set_network("*")
+proto.set_protocol("http-get")
 
 def context_available(mgr, ctx, data=None):
     global CONTEXTS
@@ -197,22 +201,44 @@ def set_pandora_uri(service, action, uri):
     getattr(action, "return")()
 
 @debug_service_call
-def list_stations(service, action):
-    w = GUPnPAV.DIDLLiteWriter.new("English")
+def list_stations(service, action, *args):
+    w = GUPnPAV.DIDLLiteWriter.new("en")
 
     ctx = service.get_context()
-    for station in CLIENT.stations:
+
+    station_list = []
+    container_id = "stations"
+    objectid = action.get_value("ObjectID", GObject.TYPE_STRING) 
+    
+    if objectid == container_id:
+        station_list = CLIENT.stations
+    else:
+        stations = w.add_container()
+        stations.set_title("Stations")
+        stations.set_parent_id("0")
+        stations.set_child_count(len(CLIENT.stations))
+        stations.set_id(container_id)
+
+    for index, station in enumerate(station_list):
         item = w.add_item()
+        item.set_parent_id(container_id)
+        item.set_id(str(index))
         item.set_title(station)
+        item.set_upnp_class("object.item.audioItem.musicTrack")
+        item.set_album("unknown")
+        item.set_artist(station)
+        item.set_restricted("0")
+
         uri = "http://%s:%s/station/%s" % (
             ctx.get_host_ip(),
             ctx.get_port(),
-            station
+            station,
             )
 
         res = item.add_resource()
         res.set_uri(uri)
-        
+        res.set_protocol_info(proto)
+
     action.set_value("Result", w.get_string())
     action.set_value("NumberReturned", len(CLIENT.stations))
     action.set_value("TotalMatches", len(CLIENT.stations))
