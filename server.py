@@ -2,6 +2,7 @@ from gi.repository import GUPnP, GUPnPAV, GObject, GLib
 from pandora import pandora
 import os, re, atexit, sys, time
 
+CLIENT = None
 CON_ID = None
 MPDCLIENT = None
 LIBRARY = None
@@ -16,30 +17,62 @@ def context_available(mgr, ctx, data=None):
     ctx.host_path("xml/device.xml", "device.xml")
     ctx.host_path("xml/AVTransport2.xml", "AVTransport2.xml")
     ctx.host_path("xml/ContentDirectory.xml", "ContentDirectory.xml")
+    ctx.host_path("xml/ConnectionManager.xml", "ConnectionManager.xml")
 
-    desc = "device.xml"
+    server_desc = "server.xml"
+    renderer_desc = "renderer.xml"
     desc_loc = "./xml/"
 
-    rd = GUPnP.RootDevice.new(ctx, desc, desc_loc)
-    rd.set_available(True)
+    mediaserver = GUPnP.RootDevice.new(ctx, server_desc, desc_loc)
+    mediaserver.set_available(True)
 
-    service = rd.get_service("urn:schemas-upnp-org:service:AVTransport:1")
-    service.connect("action-invoked::Play", pandora_play)
-    service.connect("action-invoked::Pause", pandora_play)
-    service.connect("action-invoked::Next", pandora_next)
-    service.connect("action-invoked::SetAVTransportURI", handle_uri_change)
-    service.connect("action-invoked::GetTransportInfo", handle_state_request)
-    service.connect("action-invoked::GetPositionInfo",  handle_position_request)
+    mediarenderer = GUPnP.RootDevice.new(ctx, renderer_desc, desc_loc)
+    mediarenderer.set_available(True)
 
-    directory = rd.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
+    avtransport = mediarenderer.get_service("urn:schemas-upnp-org:service:AVTransport:1")
+    avtransport.connect("action-invoked::Play", pandora_play)
+    avtransport.connect("action-invoked::Pause", pandora_play)
+    avtransport.connect("action-invoked::Next", pandora_next)
+    avtransport.connect("action-invoked::SetAVTransportURI", handle_uri_change)
+    avtransport.connect("action-invoked::GetTransportInfo", handle_state_request)
+    avtransport.connect("action-invoked::GetPositionInfo",  handle_position_request)
+
+    renderctl = mediarenderer.get_service("urn:schemas-upnp-org:service:RenderingControl:1")
+
+    directory = mediaserver.get_service("urn:schemas-upnp-org:service:ContentDirectory:1")
     directory.connect("action-invoked::Browse", list_stations)
 
-    SERVICES.append(service)
-    SERVICES.append(directory)
+    connmgr = mediarenderer.get_service("urn:schemas-upnp-org:service:ConnectionManager:1")
+    connmgr.connect("action-invoked::GetCurrentConnectionIDs", conn_get_ids)
+    connmgr.connect("action-invoked::GetCurrentConnectionInfo", conn_get_info)
+    connmgr.connect("action-invoked::GetProtocolInfo", conn_get_protocol)
 
-    MGR.manage_root_device(rd)
+    connmgr2 = mediaserver.get_service("urn:schemas-upnp-org:service:ConnectionManager:1")
+    connmgr2.connect("action-invoked::GetCurrentConnectionIDs", conn_get_ids)
+    connmgr2.connect("action-invoked::GetCurrentConnectionInfo", conn_get_info)
+    connmgr2.connect("action-invoked::GetProtocolInfo", conn_get_protocol)
+	
+    SERVICES.append(avtransport)
+    SERVICES.append(renderctl)
+    SERVICES.append(directory)
+    SERVICES.append(connmgr)
+    SERVICES.append(connmgr2)
+
+    MGR.manage_root_device(mediarenderer)
+    MGR.manage_root_device(mediaserver)
 
     print "Context setup for %s" % ctx.get_interface()
+
+def debug_service_call(func):
+    def wrapper(service, action, *args, **kwargs):
+        typ = service.get_service_type() 
+        typ = typ.split(":")[-2:-1][0]
+        device = service.props.root_device.get_device_type()
+        device = device.split(":")[-2:-1][0]
+        print "%s on %s/%s" % (action.get_name(), typ, device)
+        return func(service, action, *args, **kwargs)
+
+    return wrapper
 
 def setup_server():
     global MGR
@@ -87,16 +120,15 @@ def time_to_int(time):
     return (int(hour) * 3600) + (int(min) * 60) + int(sec)
     
         
-def handle_position_request(service, action):
-    print "Position"
-    
+@debug_service_call
+def handle_position_request(service, action):   
     w = GUPnPAV.DIDLLiteWriter.new("English")   
 
     item = w.add_item()
     item.set_title(getattr(CLIENT, "title", ""))
     item.set_artist(getattr(CLIENT, "artist", ""))
     item.set_album("%s (%s)" % (getattr(CLIENT, "album", ""),
-                                getattr(CLIENT, "station")))
+                                getattr(CLIENT, "station", "")))
 
     action.set_value("Track", "0")
     action.set_value("TrackMetaData", w.get_string())
@@ -111,10 +143,9 @@ def handle_position_request(service, action):
     
     getattr(action, "return")()
 
+@debug_service_call
 def handle_state_request(service, action):
-    print "Status"
-
-    if CLIENT.playing:
+    if CLIENT and CLIENT.playing:
         state = "PLAYING"
     else:
         state = "PAUSED_PLAYBACK"
@@ -126,16 +157,33 @@ def handle_state_request(service, action):
     getattr(action, "return")()
 
 
+@debug_service_call
+def conn_get_protocol(service, action, data=None):
+  proto = "http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_LRG,http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_MED,http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_SM,http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_TN,http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_LRG_ICO,http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_SM_ICO,http-get:*:audio/L16;rate=48000;channels=2:DLNA.ORG_PN=LPCM,http-get:*:audio/L16;rate=48000;channels=1:DLNA.ORG_PN=LPCM,http-get:*:audio/L16;rate=44100;channels=1:DLNA.ORG_PN=LPCM,http-get:*:image/png:DLNA.ORG_PN=PNG_LRG,http-get:*:image/png:DLNA.ORG_PN=PNG_TN,http-get:*:image/png:DLNA.ORG_PN=PNG_LRG_ICO,http-get:*:image/png:DLNA.ORG_PN=PNG_SM_ICO,http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_NA_ISO,http-get:*:audio/mp4:DLNA.ORG_PN=AMR_WBplus,http-get:*:audio/3gpp:DLNA.ORG_PN=AMR_3GPP,http-get:*:audio/mp4:DLNA.ORG_PN=AMR_3GPP,http-get:*:video/mpeg:DLNA.ORG_PN=MPEG1,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_1080i_AAC,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_720p_AAC,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_SD_AC3,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_SD_MPEG1_L3,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_SD_AAC_MULT5,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_L3_SD_AAC,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_L3L_SD_AAC,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_CIF15_AAC,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_BL_CIF15_AAC_520,http-get:*:audio/vnd.dolby.dd-raw:DLNA.ORG_PN=AC3,http-get:*:audio/mpeg:DLNA.ORG_PN=MP3X,http-get:*:video/3gpp:DLNA.ORG_PN=MPEG4_H263_MP4_P0_L10_AAC_LTP,http-get:*:video/3gpp:DLNA.ORG_PN=MPEG4_H263_MP4_P0_L10_AAC,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_L6_AAC,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_L5_AAC,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_L2_AAC,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_VGA_AAC,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_AAC_LTP,http-get:*:video/mp4:DLNA.ORG_PN=MPEG4_P2_MP4_SP_AAC,http-get:*:audio/3gpp:DLNA.ORG_PN=AAC_MULT5_ISO,http-get:*:audio/mp4:DLNA.ORG_PN=AAC_MULT5_ISO,http-get:*:audio/vnd.dlna.adts:DLNA.ORG_PN=AAC_MULT5_ADTS,http-get:*:audio/3gpp:DLNA.ORG_PN=AAC_ISO,http-get:*:audio/mp4:DLNA.ORG_PN=AAC_ISO,http-get:*:audio/vnd.dlna.adts:DLNA.ORG_PN=AAC_ADTS,http-get:*:audio/3gpp:DLNA.ORG_PN=AAC_ISO_320,http-get:*:audio/mp4:DLNA.ORG_PN=AAC_ISO_320,http-get:*:audio/vnd.dlna.adts:DLNA.ORG_PN=AAC_ADTS_320,http-get:*:audio/x-ms-wma:DLNA.ORG_PN=WMAPRO,http-get:*:audio/x-ms-wma:DLNA.ORG_PN=WMAFULL,http-get:*:audio/x-ms-wma:DLNA.ORG_PN=WMABASE,http-get:*:audio/L16;rate=44100;channels=2:DLNA.ORG_PN=LPCM,http-get:*:audio/mpeg:DLNA.ORG_PN=MP3,http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_SD_EU_ISO,http-get:*:video/mpeg:DLNA.ORG_PN=MPEG_TS_HD_NA_ISO,http-get:*:video/x-ms-wmv:DLNA.ORG_PN=WMVHIGH_FULL,http-get:*:*:*"
+  action.set_value("Source", proto)
+  action.set_value("Sink", proto)
+  getattr(action, "return")()
+
+@debug_service_call
+def conn_get_info(service, action, data=None):
+    pass
+
+@debug_service_call
+def conn_get_ids(*args):
+    pass
+
+@debug_service_call
 def pandora_play(service, action):
-  print "Play"
   CLIENT.toggle()
   getattr(action, "return")()
 
-def pandora_next(service, action):
-  print "Next"
+@debug_service_call
+def pandora_next(service, action, data=None):
   CLIENT.next()
   getattr(action, "return")()
 
+
+@debug_service_call
 def set_pandora_uri(service, action, uri):
     print "Playing %s" % uri
     match = re.search("/station\/(.*)$", uri)
@@ -148,11 +196,11 @@ def set_pandora_uri(service, action, uri):
 
     getattr(action, "return")()
 
+@debug_service_call
 def list_stations(service, action):
     w = GUPnPAV.DIDLLiteWriter.new("English")
 
     ctx = service.get_context()
-    import pdb; pdb.set_trace()
     for station in CLIENT.stations:
         item = w.add_item()
         item.set_title(station)
@@ -172,6 +220,8 @@ def list_stations(service, action):
 
     getattr(action, "return")()
 
+
+@debug_service_call
 def handle_uri_change(service, action):
     uri = action.get_value("CurrentURI", GObject.TYPE_STRING)
     print "Change URI: %s" % uri
