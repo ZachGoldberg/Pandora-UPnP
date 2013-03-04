@@ -1,0 +1,3 @@
+[submodule "pandora"]
+	path = pandora
+	url = ./pandora
