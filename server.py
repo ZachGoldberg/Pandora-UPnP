@@ -181,13 +181,15 @@ def handle_position_request(service, action):
     
     getattr(action, "return")()
 
+def get_client_state():
+    if CLIENT and CLIENT.playing:
+        return "PLAYING"
+    else:
+        return "PAUSED_PLAYBACK"
+
 @debug_service_call
 def handle_state_request(service, action):
-    if CLIENT and CLIENT.playing:
-        state = "PLAYING"
-    else:
-        state = "PAUSED_PLAYBACK"
-
+    state = get_client_state()
     action.set_value("CurrentTransportState", state)
     action.set_value("CurrentTransportStatus", "OK")
     action.set_value("CurrentSpeed", "1")
@@ -213,6 +215,7 @@ def conn_get_ids(*args):
 @debug_service_call
 def pandora_play(service, action):
   CLIENT.toggle()
+  service.notify_value("TransportState", get_client_state())
   getattr(action, "return")()
 
 @debug_service_call
