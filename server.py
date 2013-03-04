@@ -104,6 +104,15 @@ def save_pandora_song_info(title, artist, album, love):
     CLIENT.title = title
     CLIENT.artist = artist
     CLIENT.album = album
+    
+    w = GUPnPAV.DIDLLiteWriter.new("en")
+    item = w.add_item()
+    item.set_title(getattr(CLIENT, "title", ""))
+    item.set_artist(getattr(CLIENT, "artist", ""))
+    item.set_album("%s (%s)" % (getattr(CLIENT, "album", ""),
+                                getattr(CLIENT, "station", "")))
+    for srv in SERVICES:
+        srv.notify_value("CurrentTrackMetaData", w.get_string())
 
 def save_pandora_time_info(timeinfo):
     stime = timeinfo.split("/")
@@ -152,9 +161,8 @@ def av_get_mediainfo(service, action):
     getattr(action, "return")()
 
 @debug_service_call
-def handle_position_request(service, action):   
-    w = GUPnPAV.DIDLLiteWriter.new("English")   
-
+def handle_position_request(service, action):
+    w = GUPnPAV.DIDLLiteWriter.new("en")
     item = w.add_item()
     item.set_title(getattr(CLIENT, "title", ""))
     item.set_artist(getattr(CLIENT, "artist", ""))
