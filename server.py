@@ -40,6 +40,21 @@ def context_available(mgr, ctx, data=None):
     avtransport.connect("action-invoked::SetAVTransportURI", handle_uri_change)
     avtransport.connect("action-invoked::GetTransportInfo", handle_state_request)
     avtransport.connect("action-invoked::GetPositionInfo",  handle_position_request)
+    avtransport.connect("action-invoked::GetMediaInfo",  av_get_mediainfo)
+    avtransport.connect("action-invoked::SetNextAVTransportURI", handle_noop)
+    avtransport.connect("action-invoked::GetMediaInfo_Ext", handle_noop)
+    avtransport.connect("action-invoked::GetDeviceCapabilities", handle_noop)
+    avtransport.connect("action-invoked::GetTransportSettings", handle_noop)
+    avtransport.connect("action-invoked::Stop", handle_noop)
+    avtransport.connect("action-invoked::Record", handle_noop)
+    avtransport.connect("action-invoked::Seek", handle_noop)
+    avtransport.connect("action-invoked::Previous", handle_noop)
+    avtransport.connect("action-invoked::SetPlayMode", handle_noop)
+    avtransport.connect("action-invoked::SetRecordQualityMode", handle_noop)
+    avtransport.connect("action-invoked::GetCurrentTransportActions", handle_noop)
+    avtransport.connect("action-invoked::GetDRMState", handle_noop)
+    avtransport.connect("action-invoked::GetStateVariables", handle_noop)
+    avtransport.connect("action-invoked::SetStateVariables", handle_noop)
 
     renderctl = mediarenderer.get_service("urn:schemas-upnp-org:service:RenderingControl:1")
 
@@ -91,10 +106,10 @@ def save_pandora_song_info(title, artist, album, love):
     CLIENT.album = album
 
 def save_pandora_time_info(timeinfo):
-    stime = re.match("^.+(\d+\:\d+)\/(\d+\:\d\d)$", timeinfo)
-    CLIENT.total_time = time_to_int("00:" + stime.group(2))
+    stime = timeinfo.split("/")
+    CLIENT.total_time = time_to_int(stime[1])
     CLIENT.elapsed_time = (CLIENT.total_time - 
-                           time_to_int("00:" + stime.group(1)))
+                           time_to_int(stime[0]))
 
 
 def setup_pandora():
@@ -120,10 +135,22 @@ def int_to_time(timevalue):
                                timevalue % 60)
 
 def time_to_int(time):
-    (hour, min, sec) = time.split(":")
-    return (int(hour) * 3600) + (int(min) * 60) + int(sec)
-    
+    if time.count(":") == 2:
+        (hour, min, sec) = time.split(":")
+        return (int(hour) * 3600) + (int(min) * 60) + int(sec) 
+    else:
+        (min, sec) = time.split(":")
+        return (int(min) * 60) + int(sec)
         
+        
+@debug_service_call
+def handle_noop(service, action):
+    getattr(action, "return")()
+
+@debug_service_call
+def av_get_mediainfo(service, action):
+    getattr(action, "return")()
+
 @debug_service_call
 def handle_position_request(service, action):   
     w = GUPnPAV.DIDLLiteWriter.new("English")   
@@ -136,7 +163,14 @@ def handle_position_request(service, action):
 
     action.set_value("Track", "0")
     action.set_value("TrackMetaData", w.get_string())
-    action.set_value("TrackURI", "") #getattr(song, "url", ""))
+    ctx = service.get_context()
+    uri = "http://%s:%s/station/%s" % (
+            ctx.get_host_ip(),
+            ctx.get_port(),
+            CLIENT.station,
+            )
+
+    action.set_value("TrackURI", uri)
 
     action.set_value("TrackDuration",
                     int_to_time(getattr(CLIENT, "total_time", 0)))
